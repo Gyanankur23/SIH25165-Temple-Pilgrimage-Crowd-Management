@@ -11,10 +11,10 @@ from email.mime.text import MIMEText
 from io import BytesIO
 
 # -------------------- CONFIG --------------------
-st.set_page_config(page_title="Temple Crowd Pulse Dashboard", layout="wide")
+st.set_page_config(page_title="NexaAudit – Temple Crowd Dashboard", layout="wide")
 TEMPLES = ["Somnath", "Dwarka", "Ambaji", "Pavagadh"]
 DATA_FILE = "temple_pulse.csv"
-ALERT_EMAIL = "your-alert-email@example.com"  # Replace with actual recipient
+ALERT_EMAIL = "temple-alert@example.com"  # Replace with actual recipient
 
 # -------------------- DATA INIT --------------------
 def load_data():
@@ -22,8 +22,8 @@ def load_data():
         return pd.read_csv(DATA_FILE)
     except:
         return pd.DataFrame(columns=[
-            "timestamp", "temple", "visitor_count", "top_requests",
-            "queue_time", "payment_modes", "crowd_index"
+            "timestamp", "temple", "zone", "visitor_count", "queue_time",
+            "top_services", "payment_modes", "crowd_index", "peak_hour_flag"
         ])
 
 def save_data(df):
@@ -31,7 +31,7 @@ def save_data(df):
 
 # -------------------- ALERT FUNCTION --------------------
 def send_alert_email(subject, body):
-    sender = "your-sender-email@example.com"
+    sender = "nexaaudit-alert@example.com"
     password = "your-email-password"  # Use secrets.toml in production
     recipient = ALERT_EMAIL
 
@@ -44,45 +44,52 @@ def send_alert_email(subject, body):
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
             server.login(sender, password)
             server.sendmail(sender, recipient, msg.as_string())
-        st.success(" Alert email sent successfully!")
+        st.success("Alert dispatched to temple authorities.")
     except Exception as e:
-        st.error(f" Failed to send alert: {e}")
+        st.error(f"Failed to send alert: {e}")
 
 # -------------------- SIDEBAR --------------------
-st.sidebar.title("Navigation")
-page = st.sidebar.radio("Go to", [" Submit Pulse", " Temple Dashboard", " Alerts", " Pilgrim View", " Export", " Recent Submissions"])
+st.sidebar.title("Temple Navigation")
+page = st.sidebar.radio("Choose View", [
+    "Submit Pilgrim Pulse", "Temple Overview", "Crowd Alerts",
+    "Pilgrim Info", "Export Records", "Recent Logs"
+])
 
 # -------------------- PAGE 1: SUBMISSION FORM --------------------
-if page == " Submit Pulse":
-    st.title(" Submit Daily Temple Pulse")
+if page == "Submit Pilgrim Pulse":
+    st.title("Submit Daily Temple Pulse")
     with st.form("pulse_form"):
-        temple = st.selectbox("Temple", TEMPLES)
+        temple = st.selectbox("Temple Site", TEMPLES)
+        zone = st.text_input("Service Zone (e.g., Entry Gate, Prasad Counter)")
         visitor_count = st.number_input("Visitor Count", min_value=0)
-        top_requests = st.text_input("Top Requests / Services")
         queue_time = st.number_input("Average Queue Time (minutes)", min_value=0)
-        payment_modes = st.multiselect("Payment Breakdown", ["Cash", "Card", "UPI", "Wallet"])
+        top_services = st.text_input("Top Services / Requests")
+        payment_modes = st.multiselect("Payment Modes", ["Cash", "Card", "UPI", "Wallet"])
         crowd_index = st.slider("Crowd Index (0 = Empty, 10 = Overwhelmed)", 0, 10)
-        submitted = st.form_submit_button("Submit")
+        peak_hour_flag = st.checkbox("Is this during peak hours?")
+        submitted = st.form_submit_button("Submit Pulse")
 
     if submitted:
         data = load_data()
         new_entry = pd.DataFrame([{
             "timestamp": datetime.datetime.now(),
             "temple": temple,
+            "zone": zone,
             "visitor_count": visitor_count,
-            "top_requests": top_requests,
             "queue_time": queue_time,
+            "top_services": top_services,
             "payment_modes": ",".join(payment_modes),
-            "crowd_index": crowd_index
+            "crowd_index": crowd_index,
+            "peak_hour_flag": peak_hour_flag
         }])
         updated_data = pd.concat([data, new_entry], ignore_index=True)
         save_data(updated_data)
-        st.success("✅ Data submitted successfully!")
+        st.success("Pulse submitted successfully.")
         st.experimental_rerun()
 
-# -------------------- PAGE 2: DASHBOARD --------------------
-elif page == " Temple Dashboard":
-    st.title(" Temple-Wise Crowd Dashboard")
+# -------------------- PAGE 2: TEMPLE OVERVIEW --------------------
+elif page == "Temple Overview":
+    st.title("Temple-Wise Crowd Overview")
     data = load_data()
     temple = st.selectbox("Select Temple", TEMPLES)
     filtered = data[data["temple"] == temple]
@@ -92,30 +99,30 @@ elif page == " Temple Dashboard":
         st.metric("Average Crowd Index", round(filtered["crowd_index"].mean(), 2))
         st.metric("Average Queue Time", round(filtered["queue_time"].mean(), 2))
     with col2:
-        fig = px.histogram(filtered, x="timestamp", y="visitor_count", title="Visitor Count Over Time")
+        fig = px.bar(filtered, x="zone", y="visitor_count", color="zone", title="Zone-Wise Visitor Count")
         st.plotly_chart(fig, use_container_width=True)
 
-    st.subheader(" Crowd Heatmap")
+    st.subheader("Crowd Heatmap")
     if not filtered.empty:
-        m = folium.Map(location=[22.5, 71.5], zoom_start=6, control_scale=True)
+        m = folium.Map(location=[22.5, 71.5], zoom_start=6)
         for _, row in filtered.iterrows():
             lat = np.random.uniform(21, 24)
             lon = np.random.uniform(70, 74)
             folium.CircleMarker(
                 location=[lat, lon],
                 radius=row["crowd_index"],
-                popup=f"{row['temple']} ({row['crowd_index']})",
-                color="red",
+                popup=f"{row['temple']} – {row['zone']} ({row['crowd_index']})",
+                color="darkred",
                 fill=True
             ).add_to(m)
         st_folium(m, width=700)
 
-# -------------------- PAGE 3: ALERTS --------------------
-elif page == " Alerts":
-    st.title(" Real-Time Crowd & Anomaly Alerts")
+# -------------------- PAGE 3: CROWD ALERTS --------------------
+elif page == "Crowd Alerts":
+    st.title("Real-Time Crowd and Safety Alerts")
     data = load_data()
     if len(data) < 10:
-        st.warning("Not enough data for anomaly detection.")
+        st.warning("Insufficient data for anomaly detection.")
     else:
         model = IsolationForest(contamination=0.1)
         features = data[["visitor_count", "queue_time", "crowd_index"]]
@@ -123,32 +130,34 @@ elif page == " Alerts":
         alerts = data[data["anomaly"] == -1]
 
         for _, row in alerts.iterrows():
-            alert_msg = f"⚠️ Alert: Unusual activity at {row['temple']} — Crowd Index {row['crowd_index']}, Queue Time {row['queue_time']} mins"
+            alert_msg = f"Alert: Unusual crowd at {row['temple']} – {row['zone']} | Index {row['crowd_index']}, Queue {row['queue_time']} mins"
             st.error(alert_msg)
             send_alert_email(
-                subject=f"Alert: Crowd anomaly at {row['temple']}",
+                subject=f"Temple Alert – {row['temple']} Zone: {row['zone']}",
                 body=alert_msg
             )
 
-# -------------------- PAGE 4: PILGRIM VIEW --------------------
-elif page == " Pilgrim View":
-    st.title(" Pilgrim Pulse — Check Crowd Levels")
+# -------------------- PAGE 4: PILGRIM INFO --------------------
+elif page == "Pilgrim Info":
+    st.title("Pilgrim Crowd Snapshot")
     data = load_data()
-    temple = st.selectbox("Your Temple", TEMPLES)
+    temple = st.selectbox("Temple", TEMPLES)
     latest = data[data["temple"] == temple].sort_values("timestamp", ascending=False).head(1)
 
     if latest.empty:
-        st.info("No recent data available for your selection.")
+        st.info("No recent data available for this temple.")
     else:
         row = latest.iloc[0]
         st.metric("Crowd Index", row["crowd_index"])
         st.metric("Queue Time", f"{row['queue_time']} mins")
-        st.write(f"Top Requests: {row['top_requests']}")
+        st.write(f"Top Services: {row['top_services']}")
         st.write(f"Payment Modes: {row['payment_modes']}")
+        if row["peak_hour_flag"]:
+            st.warning("Peak hour detected – expect delays.")
 
-# -------------------- PAGE 5: EXPORT --------------------
-elif page == " Export":
-    st.title(" Export Data for Temple Authorities")
+# -------------------- PAGE 5: EXPORT RECORDS --------------------
+elif page == "Export Records":
+    st.title("Export Temple Pulse Records")
     data = load_data()
     export_format = st.radio("Choose Format", ["CSV", "Excel"])
     if export_format == "CSV":
@@ -159,9 +168,9 @@ elif page == " Export":
             data.to_excel(writer, index=False, sheet_name='TemplePulse')
         st.download_button("Download Excel", output.getvalue(), file_name="temple_pulse.xlsx")
 
-# -------------------- PAGE 6: RECENT SUBMISSIONS --------------------
-elif page == " Recent Submissions":
-    st.title(" Recent Pulse Submissions")
+# -------------------- PAGE 6: RECENT LOGS --------------------
+elif page == "Recent Logs":
+    st.title("Recent Pulse Logs")
     data = load_data()
     st.dataframe(data.sort_values("timestamp", ascending=False).head(20))
 
